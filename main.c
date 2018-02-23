@@ -6,56 +6,86 @@
 #include <netdb.h>
 #include <limits.h>
 #include <fcntl.h>
-#include <poll.h>
 #include <err.h>
 #include <sys/uio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 
 #include <dynamic.h>
+#include <reactor.h>
 
 #include "frame.h"
 #include "packet.h"
 #include "rtp.h"
 #include "reader.h"
 
-int main(int argc, char **argv)
+typedef struct app app;
+struct app
 {
-  reader video; //, audio;
-  struct pollfd fds[2];
-  int e;
+  reader audio;
+  reader video;
+};
 
-  e = reader_construct(&video, argv[1], argv[2], 1280, 720, 4, 2);
-  if (e == -1)
-    err(1, "reader_construct video");
+int audio(void *state, int type, void *data)
+{
+  app *app = state;
+  reader_frame *f;
 
-  //e = reader_construct(&video, argv[1], argv[3]);
-  //if (e == -1)
-  //  err(1, "reader_construct video");
-
-  fds[0].fd = reader_socket(&video);
-  fds[0].events = POLLIN;
-  //fds[1].fd = reader_socket(&video);
-  //fds[1].events = POLLIN;
+  if (type != READER_EVENT_DATA)
+    err(1, "audio event");
 
   while (1)
     {
-      e = poll(fds, 1, -1);
-      if (e == -1)
-        err(1, "poll");
-
-      if (fds[0].revents & POLLIN)
-        {
-          e = reader_read(&video);
-          if (e == -1)
-            err(1, "reader_read video");
-        }
-
-      //if (fds[1].revents & POLLIN)
-      //   {
-      //    e = reader_read(&video);
-      //    if (e == -1)
-      //      err(1, "reader_read video");
-      //  }
+      f = reader_front(&app->audio);
+      if (!f)
+        break;
+      //printf("audio %lu %lu\n", f->time, f->duration);
+      reader_pop(&app->audio);
     }
+
+  return REACTOR_OK;
+}
+
+int video(void *state, int type, void *data)
+{
+  app *app = state;
+  reader_frame *f;
+
+  if (type != READER_EVENT_DATA)
+    err(1, "video event");
+
+  while (1)
+    {
+      f = reader_front(&app->video);
+      if (!f)
+        break;
+      //printf("video %lu %lu\n", f->time, f->duration);
+      reader_pop(&app->video);
+    }
+
+  return REACTOR_OK;
+}
+
+int main(int argc, char **argv)
+{
+  app app;
+  int e;
+
+  reactor_core_construct();
+
+  e = reader_open(&app.video, video, &app, argv[1], argv[2]);
+  if (e != REACTOR_OK)
+    err(1, "reader_open_video");
+  reader_type_video(&app.video, 1280, 720, 4, 2, 1800);
+
+  e = reader_open(&app.audio, audio, &app, argv[1], argv[3]);
+  if (e != REACTOR_OK)
+    err(1, "reader_open_audio");
+  reader_type_audio(&app.audio, 2, 2, 1800);
+
+  e = reactor_core_run();
+  if (e != REACTOR_OK)
+    err(1, "reactor_core_run");
+
+  reactor_core_destruct();
 }
