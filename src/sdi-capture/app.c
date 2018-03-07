@@ -13,14 +13,23 @@
 
 #include "frame.h"
 #include "capture.h"
+#include "server.h"
 #include "app.h"
 
-static int app_server_event(void *state, int type, void *data)
+static int app_map_event(void *state, int type, void *data)
 {
-  (void) state;
-  (void) type;
-  (void) data;
-  err(1, "server error");
+  app_map *map = state;
+
+  switch (type)
+    {
+    case SERVER_EVENT_ERROR:
+      err(1, "[%s] server", map->endpoint);
+    case SERVER_EVENT_LOG:
+      (void) fprintf(stderr, "%s\n", (char *) data);
+      break;
+    }
+
+  return REACTOR_OK;
 }
 
 static int app_capture_event(void *state, int type, void *data)
@@ -30,27 +39,24 @@ static int app_capture_event(void *state, int type, void *data)
 
   if (type != CAPTURE_EVENT_FRAME)
     err(1, "capture error");
+
   frame = data;
-
-  if (frame->audio)
-    {
-      // sf = server_frame_new(pcm_frame_data(frame->audio), pcm_frame_size(frame->audio),
-      //                      SERVER_FLAG_STEAL_REFERENCE);
-      //frame->audio->data = NULL;
-      //server_distribute(&app->audio_server, sf);
-      //server_frame_release(sf);
-    }
-
-  if (frame->video)
-    {
-      //sf = server_frame_new(yuv_frame_data(frame->video), yuv_frame_size(frame->video),
-      //                      SERVER_FLAG_STEAL_REFERENCE);
-      //frame->video->data = NULL;
-      //server_distribute(&app->video_server, sf);
-      //server_frame_release(sf);
-    }
+  server_distribute(&app->audio.server, frame->audio);
+  server_distribute(&app->video.server, frame->video);
 
   return REACTOR_OK;
+}
+
+static int app_map_construct(app_map *map, app *app, char *endpoint, double sync)
+{
+  *map = (app_map) {.app = app, .endpoint = endpoint};
+
+  return server_open(&map->server, app_map_event, map, map->endpoint, sync);
+}
+
+static void app_map_sync(app_map *master, app_map *slave)
+{
+  server_sync(&master->server, &slave->server);
 }
 
 void app_usage(void)
@@ -113,21 +119,19 @@ int app_run(app *app)
 {
   int e;
 
-  e = capture_open(&app->capture, app_capture_event, &app, app->flags & APP_FLAG_MOCK_SDI ? CAPTURE_FLAG_MOCK : 0);
+  e = capture_open(&app->capture, app_capture_event, app, app->flags & APP_FLAG_MOCK_SDI ? CAPTURE_FLAG_MOCK : 0);
   if (e == -1)
     return -1;
 
-  /*
-  e = server_open(&app->audio_server, app_server_event, &app, app->audio_endpoint, app->sync);
+  e = app_map_construct(&app->audio, app, app->audio_endpoint, app->sync);
   if (e == -1)
     return -1;
 
-  e = server_open(&app->video_server, app_server_event, &app, app->video_endpoint, app->sync);
+  e = app_map_construct(&app->video, app, app->video_endpoint, app->sync);
   if (e == -1)
     return -1;
 
-  server_sync(&app->audio_server, &app->video_server);
-  */
+  app_map_sync(&app->audio, &app->video);
 
   if (app->flags & APP_FLAG_BACKGROUND)
     {

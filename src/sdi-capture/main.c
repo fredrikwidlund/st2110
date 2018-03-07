@@ -10,9 +10,8 @@
 
 #include "frame.h"
 #include "capture.h"
+#include "server.h"
 #include "app.h"
-
-//#include "server.h"
 
 int main(int argc, char **argv)
 {

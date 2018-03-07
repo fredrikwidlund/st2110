@@ -1,5 +1,7 @@
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
+
 #include <sys/uio.h>
 
 #include <dynamic.h>
@@ -58,12 +60,17 @@ void frame_free(frame *frame)
 
 void frame_reserve(frame *frame, size_t size)
 {
-  if (size != frame->memory.iov_len)
+  size_t previous_size;
+
+  previous_size = frame->memory.iov_len;
+  if (size != previous_size)
     {
       frame->memory.iov_base = realloc(frame->memory.iov_base, size);
       if (!frame->memory.iov_base)
         abort();
       frame->memory.iov_len = size;
+      if (size > previous_size)
+        memset((uint8_t *) frame->memory.iov_base + previous_size, 0, size - previous_size);
     }
 }
 

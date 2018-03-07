@@ -8,18 +8,25 @@ enum app_flag
 };
 
 typedef struct app app;
+typedef struct app_map app_map;
+
+struct app_map
+{
+  app     *app;
+  char    *endpoint;
+  server   server;
+};
+
 struct app
 {
   int      flags;
   double   sync;
+  char    *audio_endpoint;
+  char    *video_endpoint;
 
   capture  capture;
-
-  char    *audio_endpoint;
-  //server   audio_server;
-
-  char    *video_endpoint;
-  //server   video_server;
+  app_map  audio;
+  app_map  video;
 };
 
 void app_usage(void);

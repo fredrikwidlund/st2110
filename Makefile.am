@@ -12,6 +12,7 @@ SDI_CAPTURE_SOURCE_FILES = \
 src/common/frame.c \
 src/common/capture.c \
 src/common/capture_mock.c \
+src/common/server.c \
 src/sdi-capture/app.c \
 src/sdi-capture/main.c
 
