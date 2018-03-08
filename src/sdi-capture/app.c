@@ -142,3 +142,10 @@ int app_run(app *app)
 
   return 0;
 }
+
+void app_destruct(app *app)
+{
+  capture_close(&app->capture);
+  server_close(&app->audio.server);
+  server_close(&app->video.server);
+}

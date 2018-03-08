@@ -68,10 +68,45 @@ struct reader
   };
 };
 
+enum writer_type
+{
+  WRITER_TYPE_UNDEFINED = 0,
+  WRITER_TYPE_AUDIO,
+  WRITER_TYPE_VIDEO
+};
+
+enum writer_event
+{
+  WRITER_EVENT_ERROR
+};
+
+typedef struct writer writer;
+struct writer
+{
+  int                 type;
+  reactor_user        user;
+  reactor_descriptor  descriptor;
+  packet              packet;
+  rtp                 rtp;
+  frame_pool          pool;
+  list                queue;
+  size_t              queue_size;
+  union
+  {
+    reader_video      video;
+    reader_audio      audio;
+  };
+};
+
 int           reader_open(reader *, reactor_user_callback *, void *, char *, char *);
 void          reader_type_audio(reader *, int, int, int);
 void          reader_type_video(reader *, int, int, int, int, int);
 reader_frame *reader_front(reader *);
 void          reader_pop(reader *);
+
+int           writer_open(writer *,reactor_user_callback *, void *, char *, char *);
+void          writer_type_audio(writer *, int, int, int);
+void          writer_type_video(writer *, int, int, int, int, int);
+int           writer_push(writer *, frame *);
 
 #endif /* READER_H_INLCUDED */

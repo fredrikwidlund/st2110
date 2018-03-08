@@ -38,10 +38,12 @@ static int capture_mock_event(void *state, int type, void *data)
       frame.video = frame_new(sizeof *frame.video);
       frame_reserve(frame.video, 1280 * 720 * 4 / 2);
       frame.video->data = frame.video->memory;
+      memset(frame_data(frame.video), 0, frame_size(frame.video));
 
       frame.audio = frame_new(sizeof *frame.audio);
       frame_reserve(frame.audio, 960 * 2 * 2);
       frame.audio->data = frame.audio->memory;
+      memset(frame_data(frame.audio), 0, frame_size(frame.audio));
 
       pthread_mutex_lock(&m->capture->mutex);
       list_push_back(&m->capture->frames, &frame, sizeof frame);
@@ -75,4 +77,10 @@ void *capture_mock_new(capture *capture)
     }
 
   return m;
+}
+
+void capture_mock_free(void *m)
+{
+  reactor_timer_close(&((capture_mock *) m)->timer);
+  free(m);
 }

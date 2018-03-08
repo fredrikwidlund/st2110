@@ -31,6 +31,7 @@ struct app
 
 void app_usage(void);
 int  app_construct(app *, int, char **);
+void app_destruct(app *);
 int  app_run(app *);
 
 #endif /* APP_H_INCLUDED */

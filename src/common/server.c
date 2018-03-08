@@ -354,6 +354,7 @@ void server_distribute(server *s, frame *f)
   list_foreach(&s->clients, i)
     server_client_distribute(*i, f);
 
+
   i = list_front(&s->clients);
   while (i != list_end(&s->clients))
     {
@@ -368,4 +369,7 @@ void server_close(server *s)
 {
   reactor_descriptor_close(&s->descriptor);
   list_destruct(&s->clients, server_clients_release);
+  server_flush(s);
+  free(s->name);
+  list_clear(&s->slaves, NULL);
 }

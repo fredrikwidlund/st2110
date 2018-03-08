@@ -31,6 +31,7 @@ struct capture_frame
   frame              *video;
 };
 
-int capture_open(capture *, reactor_user_callback *, void *, int);
+int  capture_open(capture *, reactor_user_callback *, void *, int);
+void capture_close(capture *);
 
 #endif /* CAPTURE_H_INCLUDED */

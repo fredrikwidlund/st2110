@@ -78,3 +78,20 @@ int capture_open(capture *c, reactor_user_callback *callback, void *state, int f
 
   return -1;
 }
+
+void capture_close(capture *c)
+{
+  capture_frame *f;
+
+  reactor_descriptor_close(&c->descriptor);
+  list_foreach(&c->frames, f)
+    {
+      frame_release(f->audio);
+      frame_release(f->video);
+    }
+
+  list_clear(&c->frames, NULL);
+
+  if (c->internal)
+    capture_mock_free(c->internal);
+}

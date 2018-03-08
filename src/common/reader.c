@@ -241,3 +241,98 @@ void reader_pop(reader *reader)
   list_erase(i, NULL);
   reader->queue_size --;
 }
+
+/* writer */
+
+static int writer_error(writer *writer)
+{
+  return reactor_user_dispatch(&writer->user, WRITER_EVENT_ERROR, NULL);
+}
+
+static int writer_write(writer *writer)
+{
+  return packet_output(&writer->packet);
+}
+
+static int writer_event(void *state, int type, void *data)
+{
+  writer *writer = state;
+  int e, flags = *(int *) data;
+
+  (void) type;
+  if (flags & EPOLLOUT)
+    {
+      e = writer_write(writer);
+      if (e == -1)
+        return writer_error(writer);
+      flags &= ~EPOLLOUT;
+    }
+
+  if (flags)
+    return writer_error(writer);
+  return REACTOR_OK;
+}
+
+int writer_open(writer *writer, reactor_user_callback *callback, void *state, char *node, char *service)
+{
+  struct addrinfo *addrinfo;
+  int e;
+
+  *writer = (struct writer) {.type = WRITER_TYPE_UNDEFINED};
+  reactor_user_construct(&writer->user, callback, state);
+  rtp_construct(&writer->rtp);
+  list_construct(&writer->queue);
+  frame_pool_construct(&writer->pool, sizeof(frame *));
+
+  addrinfo = resolve(node, service);
+  if (!addrinfo)
+    return -1;
+
+  e = packet_construct(&writer->packet, addrinfo);
+  freeaddrinfo(addrinfo);
+  if (e == -1)
+    return -1;
+
+  return reactor_descriptor_open(&writer->descriptor, writer_event, writer, packet_socket(&writer->packet), EPOLLOUT | EPOLLET);
+}
+
+void writer_type_audio(writer *writer, int sample_size, int sample_channels, int duration)
+{
+  writer->type = WRITER_TYPE_AUDIO;
+  writer->audio = (reader_audio) {
+    .duration = duration,
+    .sample_size = sample_size,
+    .sample_channels = sample_channels
+  };
+}
+
+static int writer_audio_output(writer *writer, frame *audio)
+{
+  rtp_header *h;
+  frame *f;
+  size_t offset, packet_size;
+
+  packet_size = 48000 * 2 * 2 / 1000;
+  if (frame_size(audio) % packet_size != 0)
+    return -1;
+
+  for (offset = 0; offset < frame_size(audio); offset += packet_size)
+    {
+      f = frame_pool_new(&writer->pool);
+      frame_reserve(f, sizeof *h + packet_size);
+      f->data = f->memory;
+      h = frame_data(f);
+      memcpy((uint8_t *) frame_data(f) + sizeof *h, (uint8_t *) frame_data(audio) + offset, packet_size);
+
+      packet_write(&writer->packet, f);
+      frame_release(f);
+    }
+
+  return writer_write(writer);
+}
+
+
+int writer_push(writer *writer, frame *f)
+{
+  return writer_audio_output(writer, f);
+}

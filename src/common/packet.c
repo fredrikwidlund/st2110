@@ -31,7 +31,13 @@ int packet_construct(packet *packet, struct addrinfo *addrinfo)
   list_construct(&packet->queue);
 
   for (i = 0; i < IOV_MAX; i ++)
-    packet_new_frame(packet, i);
+    {
+      packet_new_frame(packet, i);
+      packet->msg[i] = (struct mmsghdr) {
+        .msg_hdr.msg_name = addrinfo->ai_addr,
+        .msg_hdr.msg_namelen = addrinfo->ai_addrlen,
+      };
+    }
 
   packet->socket = socket(addrinfo->ai_family, addrinfo->ai_socktype, addrinfo->ai_protocol);
   if (packet->socket == -1)
@@ -74,6 +80,35 @@ int packet_input(packet *packet)
   return 0;
 }
 
+int packet_output(packet *packet)
+{
+  int i, n;
+  frame **f;
+
+  if (list_empty(&packet->queue))
+    return 0;
+
+  f = list_front(&packet->queue);
+  for (i = 0; i < IOV_MAX && f != list_end(&packet->queue); i ++, f = list_next(f))
+    {
+      packet->msg[i].msg_hdr.msg_iov = &(*f)->data;
+      packet->msg[i].msg_hdr.msg_iovlen = 1;
+    }
+
+  n = sendmmsg(packet->socket, packet->msg, i, 0);
+  if (n == -1)
+    return errno == EAGAIN ? 0 : -1;
+
+  for (; n; n --)
+    {
+      f = list_front(&packet->queue);
+      frame_release(*f);
+      list_erase(f, NULL);
+    }
+
+  return 0;
+}
+
 frame *packet_read(packet *packet)
 {
   frame **i, *f;
@@ -85,4 +120,10 @@ frame *packet_read(packet *packet)
   f = *i;
   list_erase(i, NULL);
   return f;
+}
+
+void packet_write(packet *packet, frame *f)
+{
+  frame_hold(f);
+  list_push_back(&packet->queue, &f, sizeof f);
 }
