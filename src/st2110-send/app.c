@@ -105,6 +105,7 @@ static int app_map_run(app_map *map)
       writer_type_audio(&map->writer, 2, 2, 1800);
       return client_open(&map->client, app_map_input_event, map, map->path, 960 * 2 * 2);
     case APP_MAP_TYPE_VIDEO:
+      writer_type_video(&map->writer, 1280, 720, 4, 2, 1800);
       return client_open(&map->client, app_map_input_event, map, map->path, 1280 * 720 * 4 / 2);
     }
   return -1;

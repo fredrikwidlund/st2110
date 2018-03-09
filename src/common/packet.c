@@ -16,28 +16,45 @@
 #include "frame.h"
 #include "packet.h"
 
-static void packet_new_frame(packet *packet, size_t i)
+static void packet_prepare_frame(packet *packet, size_t i)
 {
   packet->frame[i] = frame_pool_new(&packet->pool);
   frame_reserve(packet->frame[i], 2048);
   packet->msg[i] = (struct mmsghdr) {.msg_hdr.msg_iov = &packet->frame[i]->memory, .msg_hdr.msg_iovlen = 1};
 }
 
-int packet_construct(packet *packet, struct addrinfo *addrinfo)
+static int packet_construct_writer(packet *packet, struct addrinfo *addrinfo)
 {
-  int e, i;
+  int i;
 
-  frame_pool_construct(&packet->pool, sizeof(frame));
+  *packet = (struct packet) {.type = PACKET_TYPE_WRITER};
   list_construct(&packet->queue);
 
   for (i = 0; i < IOV_MAX; i ++)
-    {
-      packet_new_frame(packet, i);
-      packet->msg[i] = (struct mmsghdr) {
-        .msg_hdr.msg_name = addrinfo->ai_addr,
-        .msg_hdr.msg_namelen = addrinfo->ai_addrlen,
-      };
-    }
+    packet->msg[i] = (struct mmsghdr) {
+      .msg_hdr.msg_name = addrinfo->ai_addr,
+      .msg_hdr.msg_namelen = addrinfo->ai_addrlen,
+    };
+
+  packet->socket = socket(addrinfo->ai_family, addrinfo->ai_socktype, addrinfo->ai_protocol);
+  if (packet->socket == -1)
+    return -1;
+
+  (void) setsockopt(packet->socket, SOL_SOCKET, SO_SNDBUF, (int[]){INT_MAX}, sizeof (int));
+  return 0;
+}
+
+static int packet_construct_reader(packet *packet, struct addrinfo *addrinfo)
+{
+  int i, e;
+
+  *packet = (struct packet) {.type = PACKET_TYPE_WRITER};
+  list_construct(&packet->queue);
+  frame_pool_construct(&packet->pool, sizeof (frame));
+
+  packet->frame = calloc(IOV_MAX, sizeof (frame *));
+  for (i = 0; i < IOV_MAX; i ++)
+    packet_prepare_frame(packet, i);
 
   packet->socket = socket(addrinfo->ai_family, addrinfo->ai_socktype, addrinfo->ai_protocol);
   if (packet->socket == -1)
@@ -51,8 +68,20 @@ int packet_construct(packet *packet, struct addrinfo *addrinfo)
       return -1;
     }
 
-  (void) setsockopt(packet->socket, SOL_SOCKET, SO_RCVBUF, (int[]){64 * 1024 * 1024}, sizeof (int));
+  (void) setsockopt(packet->socket, SOL_SOCKET, SO_RCVBUF, (int[]){INT_MAX}, sizeof (int));
   return 0;
+}
+
+int packet_construct(packet *packet, int type, struct addrinfo *addrinfo)
+{
+  switch (type)
+    {
+    case PACKET_TYPE_READER:
+      return packet_construct_reader(packet, addrinfo);
+    case PACKET_TYPE_WRITER:
+      return packet_construct_writer(packet, addrinfo);
+    }
+  return -1;
 }
 
 int packet_socket(packet *packet)
@@ -74,7 +103,7 @@ int packet_input(packet *packet)
       f = packet->frame[i];
       f->data = (struct iovec){.iov_base = f->memory.iov_base, .iov_len = packet->msg[i].msg_len};
       list_push_back(&packet->queue, &f, sizeof f);
-      packet_new_frame(packet, i);
+      packet_prepare_frame(packet, i);
     }
 
   return 0;

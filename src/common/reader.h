@@ -91,6 +91,8 @@ struct writer
   frame_pool          pool;
   list                queue;
   size_t              queue_size;
+  uint64_t            time;
+  uint32_t            sequence_number;
   union
   {
     reader_video      video;

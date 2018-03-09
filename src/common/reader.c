@@ -192,7 +192,7 @@ int reader_open(reader *reader, reactor_user_callback *callback, void *state, ch
   if (!addrinfo)
     return -1;
 
-  e = packet_construct(&reader->packet, addrinfo);
+  e = packet_construct(&reader->packet, PACKET_TYPE_READER, addrinfo);
   freeaddrinfo(addrinfo);
   if (e == -1)
     return -1;
@@ -282,13 +282,13 @@ int writer_open(writer *writer, reactor_user_callback *callback, void *state, ch
   reactor_user_construct(&writer->user, callback, state);
   rtp_construct(&writer->rtp);
   list_construct(&writer->queue);
-  frame_pool_construct(&writer->pool, sizeof(frame *));
+  frame_pool_construct(&writer->pool, sizeof(frame));
 
   addrinfo = resolve(node, service);
   if (!addrinfo)
     return -1;
 
-  e = packet_construct(&writer->packet, addrinfo);
+  e = packet_construct(&writer->packet, PACKET_TYPE_WRITER, addrinfo);
   freeaddrinfo(addrinfo);
   if (e == -1)
     return -1;
@@ -303,6 +303,18 @@ void writer_type_audio(writer *writer, int sample_size, int sample_channels, int
     .duration = duration,
     .sample_size = sample_size,
     .sample_channels = sample_channels
+  };
+}
+
+void writer_type_video(writer *writer, int width, int height, int pixel_group_size, int pixel_group_count, int duration)
+{
+  writer->type = WRITER_TYPE_VIDEO;
+  writer->video = (reader_video) {
+    .duration = duration,
+    .width = width,
+    .height = height,
+    .pixel_group_size = pixel_group_size,
+    .pixel_group_count = pixel_group_count
   };
 }
 
@@ -322,6 +334,19 @@ static int writer_audio_output(writer *writer, frame *audio)
       frame_reserve(f, sizeof *h + packet_size);
       f->data = f->memory;
       h = frame_data(f);
+      h->cc = 0;
+      h->x = 0;
+      h->p = 0;
+      h->version = 2;
+      h->pt = 96;
+      h->m = 1;
+      h->sequence_number = htons(writer->sequence_number);
+      h->timestamp = htonl(writer->time);
+      h->ssrc_identifier = 0;
+
+      writer->sequence_number ++;
+      writer->time += 90000 / 1000;
+
       memcpy((uint8_t *) frame_data(f) + sizeof *h, (uint8_t *) frame_data(audio) + offset, packet_size);
 
       packet_write(&writer->packet, f);
@@ -331,8 +356,55 @@ static int writer_audio_output(writer *writer, frame *audio)
   return writer_write(writer);
 }
 
+static int writer_video_output(writer *writer, frame *video)
+{
+  rtp_header *h;
+  reader_video_header *eh;
+  frame *f;
+  size_t offset, packet_size;
+
+  packet_size = 1280;
+  for (offset = 0; offset < frame_size(video); offset += packet_size)
+    {
+      f = frame_pool_new(&writer->pool);
+      frame_reserve(f, sizeof *h + sizeof *eh + packet_size);
+      f->data = f->memory;
+      h = frame_data(f);
+      h->cc = 0;
+      h->x = 0;
+      h->p = 0;
+      h->version = 2;
+      h->pt = 96;
+      h->m = (offset + packet_size == frame_size(video));
+      h->sequence_number = htons(writer->sequence_number);
+      h->timestamp = htonl(writer->time);
+      h->ssrc_identifier = 0;
+
+      eh = (reader_video_header *) ((uint8_t *) frame_data(f) + sizeof *h);
+      eh->extended_sequence_number = htonl(writer->sequence_number >> 16);
+      eh->srd_length = htonl(packet_size);
+      eh->srd_row_number = htonl(offset / (1280 * 4 / 2));
+      eh->srd_offset = htonl(offset - (ntohl(eh->srd_row_number) * (1280 * 4 / 2)));
+
+      memcpy((uint8_t *) frame_data(f) + sizeof *h + sizeof *eh, (uint8_t *) frame_data(video) + offset, packet_size);
+
+      writer->sequence_number ++;
+      packet_write(&writer->packet, f);
+      frame_release(f);
+    }
+
+  writer->time += 90000 / 50;
+  return writer_write(writer);
+}
 
 int writer_push(writer *writer, frame *f)
 {
-  return writer_audio_output(writer, f);
+  switch (writer->type)
+    {
+    case WRITER_TYPE_AUDIO:
+      return writer_audio_output(writer, f);
+    case WRITER_TYPE_VIDEO:
+      return writer_video_output(writer, f);
+    }
+  return -1;
 }
